@@ -1,5 +1,550 @@
-123
-im matin hoseini
-im 18 years old
-سلام به همه
-سلام
+import requests
+import hashlib
+import time
+import datetime
+import json
+import os
+
+BOT_TOKEN = "7466526823:AAFBMdxP9kGUBrKDthvlZR26zcTcMVKG6bI"
+ADMIN_ID = "7172173925"
+
+telegram_api_url = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+USERS_FILE = "users.json"
+SOURCES_FILE = "sources.json"
+LOG_FILE = "messages_log.json"
+
+
+# --- بارگذاری داده‌ها یا ایجاد فایل‌های خالی ---
+def load_json(filename):
+    if os.path.exists(filename):
+        with open(filename, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def save_json(filename, data):
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+users = load_json(
+    USERS_FILE)  # { chat_id: {"last_active": timestamp, "name": username} }
+messages_log = load_json(LOG_FILE)  # list of {chat_id, name, text, time}
+sources = load_json(SOURCES_FILE)
+
+if not sources:
+    sources = {
+        "Barry - VLess": {
+            "url":
+            "https://raw.githubusercontent.com/barry-far/V2ray-config/main/Splitted-By-Protocol/vless.txt",
+            "repo": "barry-far/V2ray-config",
+            "path": "Splitted-By-Protocol/vless.txt"
+        },
+        "Barry - Sub1": {
+            "url":
+            "https://raw.githubusercontent.com/barry-far/V2ray-config/main/Sub1.txt",
+            "repo": "barry-far/V2ray-config",
+            "path": "Sub1.txt"
+        },
+        "EbraSha": {
+            "url":
+            "https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/refs/heads/main/V2Ray-Config-By-EbraSha.txt",
+            "repo": "ebrasha/free-v2ray-public-list",
+            "path": "V2Ray-Config-By-EbraSha.txt"
+        },
+        "Epodonios - VLess": {
+            "url":
+            "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/Splitted-By-Protocol/vless.txt",
+            "repo": "Epodonios/v2ray-configs",
+            "path": "Splitted-By-Protocol/vless.txt"
+        },
+        "Epodonios - Sub1": {
+            "url":
+            "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/Sub1.txt",
+            "repo": "Epodonios/v2ray-configs",
+            "path": "Sub1.txt"
+        },
+        "Test File": {
+            "url":
+            "https://raw.githubusercontent.com/matinhoseini5609/v2ray-test/main/test.txt",
+            "repo": "matinhoseini5609/v2ray-test",
+            "path": "test.txt"
+        }
+    }
+    save_json(SOURCES_FILE, sources)
+
+last_hashes = {}
+cache_commit_times = {}
+
+
+def send_telegram_message(chat_id, text, reply_markup=None):
+    url = f"{telegram_api_url}/sendMessage"
+    data = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        data["reply_markup"] = json.dumps(reply_markup)
+    try:
+        response = requests.post(url, data=data)
+        if response.status_code != 200:
+            print(
+                f"❌ خطا در ارسال پیام: {response.status_code} - {response.text}"
+            )
+    except Exception as e:
+        print(f"❌ خطا در ارسال پیام: {e}")
+
+
+def edit_telegram_message(chat_id, message_id, text, reply_markup=None):
+    url = f"{telegram_api_url}/editMessageText"
+    data = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+    }
+    if reply_markup:
+        data["reply_markup"] = json.dumps(reply_markup)
+    try:
+        response = requests.post(url, data=data)
+        if response.status_code != 200:
+            print(
+                f"❌ خطا در ویرایش پیام: {response.status_code} - {response.text}"
+            )
+    except Exception as e:
+        print(f"❌ خطا در ویرایش پیام: {e}")
+
+
+def load_users():
+    global users
+    users = load_json(USERS_FILE)
+
+
+def save_users():
+    save_json(USERS_FILE, users)
+
+
+def load_logs():
+    global messages_log
+    messages_log = load_json(LOG_FILE)
+
+
+def save_logs():
+    save_json(LOG_FILE, messages_log)
+
+
+def load_sources():
+    global sources
+    sources = load_json(SOURCES_FILE)
+
+
+def save_sources():
+    save_json(SOURCES_FILE, sources)
+
+
+def add_user(chat_id, name):
+    users[str(chat_id)] = {
+        "last_active": int(time.time()),
+        "name": name or "ناشناس"
+    }
+    save_users()
+
+
+def update_user_activity(chat_id):
+    uid = str(chat_id)
+    if uid in users:
+        users[uid]["last_active"] = int(time.time())
+        save_users()
+
+
+def log_message(chat_id, name, text):
+    messages_log.append({
+        "chat_id": chat_id,
+        "name": name or "ناشناس",
+        "text": text,
+        "time": int(time.time())
+    })
+    if len(messages_log) > 100:
+        messages_log.pop(0)
+    save_logs()
+
+
+def check_sources():
+    global last_hashes
+    for name, info in sources.items():
+        try:
+            response = requests.get(info["url"], timeout=15)
+            if response.status_code == 200:
+                content = response.text.strip()
+                content_hash = hashlib.sha256(content.encode()).hexdigest()
+                if name not in last_hashes:
+                    last_hashes[name] = content_hash
+                elif last_hashes[name] != content_hash:
+                    last_hashes[name] = content_hash
+                    message = f"📢 کانفیگ جدید منتشر شد!\n📄 منبع: {name}\n🔗 لینک: {info['url']}"
+                    for uid in users.keys():
+                        send_telegram_message(uid, message)
+        except Exception as e:
+            print(f"❌ خطا در بررسی {name}: {e}")
+
+
+def format_time_difference(ts):
+    if not ts:
+        return "⛔ خطا در دریافت زمان"
+    now = int(time.time())
+    diff = now - ts
+    if diff < 60:
+        return "همین الان"
+    elif diff < 3600:
+        return f"{diff//60} دقیقه پیش"
+    elif diff < 86400:
+        return f"{diff//3600} ساعت پیش"
+    else:
+        return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+
+
+def get_last_commit_time(repo, path):
+    key = f"{repo}/{path}"
+    now = time.time()
+    if key in cache_commit_times:
+        cache_time, cached_dt = cache_commit_times[key]
+        if now - cache_time < 300:
+            return cached_dt
+
+    url = f"https://api.github.com/repos/{repo}/commits"
+    params = {"path": path, "per_page": 1}
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            commit_data = response.json()
+            if commit_data:
+                commit_time = commit_data[0]["commit"]["author"]["date"]
+                dt = datetime.datetime.strptime(commit_time,
+                                                "%Y-%m-%dT%H:%M:%SZ")
+                cache_commit_times[key] = (now, dt)
+                return dt
+    except Exception as e:
+        print(f"❌ خطا در دریافت زمان commit برای {repo}/{path}: {e}")
+    return None
+
+
+def handle_updates_command(chat_id):
+    message = "🔄 وضعیت آخرین آپدیت گیت‌هاب:\n\n"
+    for name, info in sources.items():
+        last_commit = get_last_commit_time(info["repo"], info["path"])
+        ts = int(last_commit.timestamp()) if last_commit else None
+        message += f"📌 {name}: {format_time_difference(ts)}\n"
+    send_telegram_message(chat_id, message)
+
+
+def send_subscription_links(chat_id):
+    message = "🌐 لینک‌های کانفیگ:\n\n"
+    for name, info in sources.items():
+        message += f"🔗 {name}:\n{info['url']}\n\n"
+    send_telegram_message(chat_id, message)
+
+
+def broadcast_to_all(message):
+    for uid in users.keys():
+        send_telegram_message(uid, f"📢 پیام مدیر:\n\n{message}")
+
+
+def list_users(chat_id):
+    lines = [f"👥 تعداد کاربران: {len(users)}\n\n"]
+    now = int(time.time())
+    for uid, info in users.items():
+        last_active = format_time_difference(info.get("last_active"))
+        name = info.get("name", "ناشناس")
+        lines.append(f"- {name} (id: {uid}): آخرین فعالیت {last_active}")
+    send_telegram_message(chat_id, "\n".join(lines))
+
+
+def list_logs(chat_id):
+    lines = []
+    for log in reversed(messages_log[-20:]):
+        t = datetime.datetime.fromtimestamp(
+            log["time"]).strftime("%Y-%m-%d %H:%M:%S")
+        lines.append(
+            f"{t} | {log['name']} (id:{log['chat_id']}): {log['text']}")
+    if not lines:
+        lines = ["هیچ پیامی در لاگ موجود نیست."]
+    send_telegram_message(chat_id, "📜 ۲۰ پیام آخر:\n\n" + "\n".join(lines))
+
+
+def show_last_activity(chat_id):
+    lines = [f"👤 آخرین فعالیت کاربران:\n\n"]
+    now = int(time.time())
+    for uid, info in users.items():
+        last_active = format_time_difference(info.get("last_active"))
+        name = info.get("name", "ناشناس")
+        lines.append(f"- {name} (id: {uid}): {last_active}")
+    send_telegram_message(chat_id, "\n".join(lines))
+
+
+# Admin Panel Inline Keyboard Buttons
+def admin_panel_keyboard():
+    keyboard = {
+        "inline_keyboard": [[{
+            "text": "🔄 بررسی منابع",
+            "callback_data": "check_sources"
+        }, {
+            "text": "🗂 منابع فعلی",
+            "callback_data": "show_sources"
+        }],
+                            [{
+                                "text": "👥 تعداد کاربران",
+                                "callback_data": "count_users"
+                            }, {
+                                "text": "👤 آخرین فعالیت کاربران",
+                                "callback_data": "last_activity_users"
+                            }],
+                            [{
+                                "text": "👥 ارسال پیام همگانی",
+                                "callback_data": "broadcast_start"
+                            }, {
+                                "text": "📜 گزارش پیام‌ها",
+                                "callback_data": "show_logs"
+                            }],
+                            [{
+                                "text": "➕ افزودن لینک جدید",
+                                "callback_data": "add_link"
+                            }, {
+                                "text": "❌ حذف لینک",
+                                "callback_data": "delete_link"
+                            }],
+                            [{
+                                "text": "🛑 خروج از پنل",
+                                "callback_data": "exit_panel"
+                            }]]
+    }
+    return keyboard
+
+
+admin_state = {
+    "mode": None,
+    "broadcast_message": None,
+    "add_link_name": None,
+    "delete_link_name": None,
+    "panel_message_id": None,
+}
+
+
+def handle_callback_query(update):
+    callback = update.get("callback_query")
+    if not callback:
+        return
+
+    chat_id = callback["message"]["chat"]["id"]
+    message_id = callback["message"]["message_id"]
+    data = callback["data"]
+
+    # فقط ادمین اجازه داره
+    if str(chat_id) != ADMIN_ID:
+        send_telegram_message(chat_id,
+                              "⛔️ شما اجازه دسترسی به پنل مدیریت را ندارید.")
+        return
+
+    # واکنش به دکمه‌ها
+    if data == "check_sources":
+        check_sources()
+        edit_telegram_message(chat_id,
+                              message_id,
+                              "🔄 منابع بررسی شدند.",
+                              reply_markup=admin_panel_keyboard())
+    elif data == "show_sources":
+        msg = "🌐 منابع فعلی:\n\n"
+        for name, info in sources.items():
+            msg += f"🔗 {name}:\n{info['url']}\n\n"
+        edit_telegram_message(chat_id,
+                              message_id,
+                              msg,
+                              reply_markup=admin_panel_keyboard())
+    elif data == "count_users":
+        edit_telegram_message(chat_id,
+                              message_id,
+                              f"👥 تعداد کل کاربران ثبت‌شده: {len(users)}",
+                              reply_markup=admin_panel_keyboard())
+    elif data == "last_activity_users":
+        lines = []
+        for uid, info in users.items():
+            last_active = format_time_difference(info.get("last_active"))
+            name = info.get("name", "ناشناس")
+            lines.append(f"- {name} (id: {uid}): {last_active}")
+        edit_telegram_message(chat_id,
+                              message_id,
+                              "👤 آخرین فعالیت کاربران:\n\n" + "\n".join(lines),
+                              reply_markup=admin_panel_keyboard())
+    elif data == "broadcast_start":
+        admin_state["mode"] = "broadcast_wait_message"
+        admin_state["panel_message_id"] = message_id
+        edit_telegram_message(
+            chat_id,
+            message_id,
+            "✍️ لطفاً پیام خود را ارسال کنید...\n(پیام خود را به صورت متنی ارسال کنید)",
+            reply_markup=None)
+    elif data == "show_logs":
+        lines = []
+        for log in reversed(messages_log[-20:]):
+            t = datetime.datetime.fromtimestamp(
+                log["time"]).strftime("%Y-%m-%d %H:%M:%S")
+            lines.append(
+                f"{t} | {log['name']} (id:{log['chat_id']}): {log['text']}")
+        if not lines:
+            lines = ["هیچ پیامی در لاگ موجود نیست."]
+        edit_telegram_message(chat_id,
+                              message_id,
+                              "📜 ۲۰ پیام آخر:\n\n" + "\n".join(lines),
+                              reply_markup=admin_panel_keyboard())
+    elif data == "add_link":
+        admin_state["mode"] = "add_link_wait_name"
+        admin_state["panel_message_id"] = message_id
+        edit_telegram_message(chat_id,
+                              message_id,
+                              "نام منبع جدید را وارد کنید:",
+                              reply_markup=None)
+    elif data == "delete_link":
+        admin_state["mode"] = "delete_link_wait_name"
+        admin_state["panel_message_id"] = message_id
+        edit_telegram_message(chat_id,
+                              message_id,
+                              "نام منبع برای حذف را وارد کنید:",
+                              reply_markup=None)
+    elif data == "exit_panel":
+        admin_state["mode"] = None
+        admin_state["panel_message_id"] = None
+        edit_telegram_message(chat_id,
+                              message_id,
+                              "✅ از پنل خارج شدید.",
+                              reply_markup=None)
+
+
+def process_admin_text(chat_id, text):
+    mode = admin_state.get("mode")
+    if str(chat_id) != ADMIN_ID:
+        return False
+
+    if mode == "broadcast_wait_message":
+        broadcast_to_all(text)
+        send_telegram_message(chat_id, "✅ پیام برای همه ارسال شد.")
+        admin_state["mode"] = None
+        # بعد از پایان، پنل را دوباره نشان بده
+        if admin_state.get("panel_message_id"):
+            send_telegram_message(chat_id,
+                                  "🎛 پنل مدیریتی:",
+                                  reply_markup=admin_panel_keyboard())
+        return True
+
+    elif mode == "add_link_wait_name":
+        admin_state["add_link_name"] = text.strip()
+        admin_state["mode"] = "add_link_wait_url"
+        send_telegram_message(chat_id, "لطفا لینک منبع را ارسال کنید:")
+        return True
+
+    elif mode == "add_link_wait_url":
+        url = text.strip()
+        name = admin_state.get("add_link_name")
+        if not name or not url:
+            send_telegram_message(chat_id,
+                                  "نام یا لینک معتبر نیست. عملیات لغو شد.")
+        else:
+            sources[name] = {"url": url, "repo": "", "path": ""}
+            save_sources()
+            send_telegram_message(chat_id,
+                                  f"✅ منبع جدید با نام '{name}' اضافه شد.")
+        admin_state["mode"] = None
+        admin_state["add_link_name"] = None
+        # بعد از پایان، پنل را دوباره نشان بده
+        send_telegram_message(chat_id,
+                              "🎛 پنل مدیریتی:",
+                              reply_markup=admin_panel_keyboard())
+        return True
+
+    elif mode == "delete_link_wait_name":
+        name = text.strip()
+        if name in sources:
+            del sources[name]
+            save_sources()
+            send_telegram_message(chat_id, f"✅ منبع '{name}' حذف شد.")
+        else:
+            send_telegram_message(chat_id, f"❌ منبع '{name}' پیدا نشد.")
+        admin_state["mode"] = None
+        # بعد از پایان، پنل را دوباره نشان بده
+        send_telegram_message(chat_id,
+                              "🎛 پنل مدیریتی:",
+                              reply_markup=admin_panel_keyboard())
+        return True
+
+    return False
+
+
+def main():
+    print("ربات راه‌اندازی شد.")
+    send_telegram_message(ADMIN_ID, "✅ ربات با موفقیت اجرا شد.")
+
+    update_id = None
+
+    while True:
+        check_sources()
+
+        url = f"{telegram_api_url}/getUpdates"
+        params = {"timeout": 10}
+        if update_id:
+            params["offset"] = update_id
+
+        try:
+            resp = requests.get(url, params=params)
+            if resp.status_code == 200:
+                updates = resp.json().get("result", [])
+                for update in updates:
+                    update_id = update["update_id"] + 1
+
+                    # اول بررسی callback query
+                    if "callback_query" in update:
+                        handle_callback_query(update)
+                        continue
+
+                    message = update.get("message", {})
+                    text = message.get("text", "").strip()
+                    chat_id = message.get("chat", {}).get("id")
+                    username = message.get("from", {}).get("username", None)
+
+                    if not chat_id or not text:
+                        continue
+
+                    # ذخیره کاربر و آپدیت زمان فعالیت
+                    if str(chat_id) not in users:
+                        add_user(chat_id, username)
+                    else:
+                        update_user_activity(chat_id)
+
+                    log_message(chat_id, username, text)
+
+                    # اگر ادمین در حالت خاص است، متن را پردازش کن
+                    if process_admin_text(chat_id, text):
+                        continue
+
+                    # دستورات معمول
+                    if text == "/start" or text.lower() == "الو":
+                        send_subscription_links(chat_id)
+                    elif text == "/updates" or text == "🔄 بررسی منابع":
+                        handle_updates_command(chat_id)
+                    elif text == "/adminpanel":
+                        if str(chat_id) == ADMIN_ID:
+                            send_telegram_message(
+                                chat_id,
+                                "🎛 پنل مدیریتی:",
+                                reply_markup=admin_panel_keyboard())
+                        else:
+                            send_telegram_message(
+                                chat_id, "⛔️ شما اجازه دسترسی ندارید.")
+                    elif text == "🗂 منابع فعلی":
+                        send_subscription_links(chat_id)
+                    else:
+                        # پیام‌های دیگر، اینجا پردازش خاصی ندارند
+                        pass
+
+        except Exception as e:
+            print(f"❌ خطا در اجرای ربات: {e}")
+
+        time.sleep(2)
+
+
+if __name__ == "__main__":
+    main()
